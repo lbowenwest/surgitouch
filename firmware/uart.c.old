@@ -1,0 +1,48 @@
+#include <stdint.h>
+#include <avr/io.h>
+
+#include "time.h"
+#include "uart.h"
+
+#ifndef BAUD
+#define BAUD 57600
+#endif
+#define UBRR_VAL ((F_CPU / (16UL * BAUD)) - 1)
+
+
+// Initialize the UART
+void uart_init(void) {
+  // Enable bidirectional UART
+  UCSR1B |= _BV(RXEN1) | _BV(TXEN1);
+  // Use 8-bit characters
+  UCSR1C |= _BV(UCSZ10) | _BV(UCSZ11) & ~_BV(USBS1);
+  // Set the Baud rate
+  UBRR1H = (UBRR_VAL >> 8) & 0x10;
+  UBRR1L = UBRR_VAL & 0xFF;
+}
+
+
+void uart_send(uint8_t tx_byte) {
+  // Wait to be able to transmit
+  while(!( UCSR1A & _BV(UDRE1) ));
+  // Put the data into the send buffer
+  UDR1 = tx_byte;
+}
+
+
+uint8_t uart_recv(uint32_t tout) {
+  uint32_t now = time_now();
+  // Wait for data to be received
+  while (!( UCSR1A & _BV(RXC1) )) {
+    if (time_now() - now >= tout)
+      return 0;
+  }
+  // Get and return data from buffer
+  return UDR1;
+}
+
+
+void uart_flush(void) {
+  uint8_t dummy;
+  while ( UCSR1A & _BV(RXC1) ) dummy = UDR1;
+}
