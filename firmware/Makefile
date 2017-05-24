@@ -96,7 +96,7 @@ TARGET = surgitouch
 OBJDIR = .
 
 # Path to the LUFA library
-LUFA_PATH = .
+LUFA_PATH = ../lib
 
 
 # LUFA library compile-time options and predefined tokens
