@@ -1,5 +1,5 @@
 #ifndef _ROBOCLAW_H
-#define _ROBOCLAW_H
+#define _ROBOCLAW_H<
 
 #include <stdint.h>
 #include <stdarg.h>
