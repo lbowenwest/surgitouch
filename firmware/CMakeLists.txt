@@ -8,6 +8,9 @@ SET(CMAKE_CXX_FLAGS
   "${CMAKE_CXX_FLAGS} -fno-threadsafe-statics"
 )
 
+register_hardware_platform(/usr/share/arduino/hardware/archlinux-arduino/avr)
+SET(ARDUINO_AVRDUDE_CONFIG_PATH /etc/avrdude.conf)
+
 link_directories(../lib)
 
 generate_arduino_firmware(surgitouch
