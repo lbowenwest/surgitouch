@@ -9,7 +9,6 @@ SET(CMAKE_CXX_FLAGS
 )
 
 register_hardware_platform(/usr/share/arduino/hardware/archlinux-arduino/avr)
-SET(ARDUINO_AVRDUDE_CONFIG_PATH /etc/avrdude.conf)
 
 link_directories(../lib)
 

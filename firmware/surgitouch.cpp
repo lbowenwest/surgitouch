@@ -24,7 +24,6 @@ ros::Subscriber<geometry_msgs::Vector3> force("surgitouch/force", force_cb);
 ros::Publisher chatter("surgitouch/chatter", &str_msg);
 ros::Subscriber<std_msgs::String> change("surgitouch/change_message", message_cb);
 
-
 void force_cb(const geometry_msgs::Vector3 &message) {
   x_force = message.x;
   y_force = message.y;
@@ -46,7 +45,6 @@ void setup() {
 }
 
 void loop() {
-
   str_msg.data = buffer;
   chatter.publish(&str_msg);
 
