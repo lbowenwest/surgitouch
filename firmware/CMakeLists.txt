@@ -5,10 +5,8 @@ include_directories(${ROS_LIB_DIR})
 add_definitions(-DUSB_CON)
 
 SET(CMAKE_CXX_FLAGS
-  "${CMAKE_CXX_FLAGS} -fno-threadsafe-statics -Wno-dev -DTESTING=1"
+  "${CMAKE_CXX_FLAGS} -fno-threadsafe-statics"
 )
-
-register_hardware_platform(/usr/share/arduino/hardware/archlinux-arduino/avr)
 
 link_directories(../lib)
 
@@ -17,4 +15,3 @@ generate_arduino_firmware(surgitouch
   BOARD leonardo
   PORT /dev/ttyACM0
 )
-

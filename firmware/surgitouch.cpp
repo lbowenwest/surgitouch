@@ -19,12 +19,8 @@ ros::NodeHandle nh;
 RoboClaw rc(&Serial1, 10000);
 #define address 0x80
 
-float torque_min = FORCE_MIN * JOYSTICK_LENGTH;
-float torque_max = STALL_TORQUE / SAFETY_FACTOR;
-float x = pow((torque_max / torque_min), (1 / NUM_STEPS));
-
-// values to store current positions, and desired forces
-float x_position, y_position, x_force, y_force;
+// values to store desired forces
+float force_x, force_y;
 
 // message to send position to ROS
 geometry_msgs::Pose2D pos_msg;
@@ -36,9 +32,10 @@ ros::Subscriber<geometry_msgs::Vector3> force("surgitouch/force", force_cb);
 
 // store forces in global variables
 void force_cb(const geometry_msgs::Vector3 &message) {
-  x_force = message.x;
-  y_force = message.y;
+  force_x = message.x;
+  force_y = message.y;
 }
+
 
 #ifdef TESTING
 // buffer to store text, used in testing
@@ -80,13 +77,11 @@ void loop() {
   float pos_x, pos_y;
   bool valid = get_normal_positions(&rc, &pos_x, &pos_y);
 
-  // if we got a valid result, publish the results
-  if (valid) {
-    pos_msg.x = pos_x;
-    pos_msg.y = pos_y;
+  // publish the positions
+  pos_msg.x = pos_x;
+  pos_msg.y = pos_y;
 
-    position.publish(&pos_msg);
-  }
+  position.publish(&pos_msg);
 
 
 #ifdef TESTING
@@ -94,9 +89,10 @@ void loop() {
   chatter.publish(&str_msg);
 #endif
 
-  nh.spinOnce();
+  // Apply forces from force topic
+  apply_force(&rc, force_x, force_y);
 
-  delay(100);
+  nh.spinOnce();
 
 }
 
@@ -134,4 +130,24 @@ bool get_normal_positions(RoboClaw *rc, float *x, float *y) {
   *y = constrain(length_y / CENTRE_DISTANCE, -1, 1);
 
   return true;
+}
+
+void apply_force(RoboClaw *rc, float fx, float fy) {
+  // Ensure forces are between -1 and 1
+  fx = constrain(fx, -1, 1);
+  fy = constrain(fy, -1, 1);
+
+  // calculate pwms from forces
+  float pwm_x = constrain(get_PWM(fx), 0, 127);
+  float pwm_y = constrain(get_PWM(fy), 0, 127);
+
+  if (fx < 0)
+    rc->ForwardM1(address, pwm_x);
+  else
+    rc->BackwardM1(address, pwm_x);
+
+  if (fy < 0)
+    rc->ForwardM2(address, pwm_y);
+  else
+    rc->BackwardM2(address, pwm_y);
 }

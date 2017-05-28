@@ -26,8 +26,14 @@
 // Nominal Voltage = 24V
 #define NOMINAL_VOLTAGE   16.0
 
+#define TORQUE_MIN        FORCE_MIN * JOYSTICK_LENGTH
+#define TORQUE_MAX        STALL_TORQUE / SAFETY_FACTOR
+
+#define get_PWM(length) (127 * (TORQUE_MIN / (NOMINAL_VOLTAGE * TORQUE_CONST)) * RESISTANCE * pow(TORQUE_MAX` /TORQUE_MIN, fabs(length)))
+
 bool get_encoder_positions(RoboClaw *rc, int32_t *enc1, int32_t *enc2);
 bool get_normal_positions(RoboClaw *rc, float *x, float *y);
+void apply_force(RoboClaw *rc, float fx, float fy);
 
 #ifdef TESTING
 void message_cb(const std_msgs::String &message);
