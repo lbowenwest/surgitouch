@@ -29,7 +29,7 @@
 #define TORQUE_MIN        FORCE_MIN * JOYSTICK_LENGTH
 #define TORQUE_MAX        STALL_TORQUE / SAFETY_FACTOR
 
-#define get_PWM(length) (127 * (TORQUE_MIN / (NOMINAL_VOLTAGE * TORQUE_CONST)) * RESISTANCE * pow(TORQUE_MAX` /TORQUE_MIN, fabs(length)))
+#define get_PWM(length) (127 * (TORQUE_MIN / (NOMINAL_VOLTAGE * TORQUE_CONST)) * RESISTANCE * pow(TORQUE_MAX /TORQUE_MIN, fabs(length)))
 
 bool get_encoder_positions(RoboClaw *rc, int32_t *enc1, int32_t *enc2);
 bool get_normal_positions(RoboClaw *rc, float *x, float *y);

@@ -58,3 +58,7 @@ CATKIN_IGNORE
 *.lst
 *.map
 *.srec
+
+# Platformio
+.pioenvs
+.piolibdeps
