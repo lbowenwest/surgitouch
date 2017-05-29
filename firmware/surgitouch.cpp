@@ -75,7 +75,7 @@ void setup() {
 void loop() {
   // declare variable for positions, then read them
   float pos_x, pos_y;
-  bool valid = get_normal_positions(&rc, &pos_x, &pos_y);
+  get_normal_positions(&rc, &pos_x, &pos_y);
 
   // publish the positions
   pos_msg.x = pos_x;
