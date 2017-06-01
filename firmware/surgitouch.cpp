@@ -1,100 +1,113 @@
 #include <ros.h>
 #include <geometry_msgs/Pose2D.h>
 #include <geometry_msgs/Vector3.h>
-#ifdef TESTING
-#include <std_msgs/String.h>
-#endif
+#include <std_msgs/Empty.h>
 
 #include <Arduino.h>
 #include <SoftwareSerial.h>
 #include <RoboClaw.h>
+#include <PID_v1.h>
 
 #include "surgitouch.h"
 
 // declare ROS node handler
 ros::NodeHandle nh;
 
-// declare RoboClaw
-// Serial1 is hardware serial on leonardo
+// declare RoboClaw, Serial1 is hardware serial on leonardo
 RoboClaw rc(&Serial1, 10000);
 #define address 0x80
 
-// values to store desired forces
-float force_x, force_y;
+
+// PID current control for each motor
+double Kp = 0, Ki = 0, Kd = 0;
+uint8_t x_direction = MOTOR_FORWARDS, y_direction = MOTOR_FORWARDS;
+// PID control for x motor
+double x_setpoint = 0, x_input = 0, x_output = 0;
+PID x_control(&x_setpoint, &x_input, &x_output, Kp, Ki, Kd, DIRECT);
+// PID control for y motor
+double y_setpoint = 0, y_input = 0, y_output = 0;
+PID y_control(&y_setpoint, &y_input, &y_output, Kp, Ki, Kd, DIRECT);
+
 
 // message to send position to ROS
 geometry_msgs::Pose2D pos_msg;
-
 // publisher for position
 ros::Publisher position("surgitouch/position", &pos_msg);
+
+
 // subscriber to force changes
 ros::Subscriber<geometry_msgs::Vector3> force("surgitouch/force", force_cb);
-
 // store forces in global variables
 void force_cb(const geometry_msgs::Vector3 &message) {
-  force_x = message.x;
-  force_y = message.y;
+  x_direction = message.x > 0 ? MOTOR_FORWARDS : MOTOR_BACKWARDS;
+  x_setpoint = calculate_pwm(message.x);
+  y_direction = message.y > 0 ? MOTOR_FORWARDS : MOTOR_BACKWARDS;
+  y_setpoint = calculate_pwm(message.y);
 }
 
 
-#ifdef TESTING
-// buffer to store text, used in testing
-char buffer[50] = "hello world!\0";
-std_msgs::String str_msg;
-
-ros::Publisher chatter("surgitouch/chatter", &str_msg);
-ros::Subscriber<std_msgs::String> change("surgitouch/change_message", message_cb);
-
-void message_cb(const std_msgs::String &message) {
-  strcpy(buffer, message.data);
+// subscriber to zero encoders
+ros::Subscriber<std_msgs::Empty> zero("surgitouch/zero", zero_encoders);
+// zero the encoders
+void zero_encoders(const std_msgs::Empty &mesage) {
+  rc.SetEncM1(address, 0);
+  rc.SetEncM2(address, 0);
 }
-#endif
 
 
+// setup function, runs once
 void setup() {
   // initialise node handler
   nh.initNode();
 
-#ifdef TESTING
-  nh.advertise(chatter);
-  nh.subscribe(change);
-#endif
-
-  // advertise position channel, and subscribe to force channel
+  // advertise position channel, and subscribe to force and zero channels
   nh.advertise(position);
   nh.subscribe(force);
+  nh.subscribe(zero);
 
   // initialise RoboClaw communication
   rc.begin(38400);
   // set initial encoder values to zero
   rc.SetEncM1(address, 0);
   rc.SetEncM2(address, 0);
+
+  // set output limits for current controllers
+  x_control.SetOutputLimits(0, 127);
+  y_control.SetOutputLimits(0, 127);
 }
 
-
+// loop function, runs forever
 void loop() {
   // declare variable for positions, then read them
-  float pos_x, pos_y;
-  get_normal_positions(&rc, &pos_x, &pos_y);
+  float x_pos, y_pos;
+  get_normal_positions(&rc, &x_pos, &y_pos);
 
   // publish the positions
-  pos_msg.x = pos_x;
-  pos_msg.y = pos_y;
+  pos_msg.x = x_pos;
+  pos_msg.y = y_pos;
 
   position.publish(&pos_msg);
 
+  // read PWM values and set as current control inputs
+  x_input = rc.ReadSpeedM1(address);
+  y_input = rc.ReadSpeedM2(address);
+  // compute new current control
+  x_control.Compute();
+  y_control.Compute();
+  // apply the currents through the roboclaw
+  apply_current(&rc, x_direction, (uint8_t)x_output, y_direction, (uint8_t)y_output);
 
-#ifdef TESTING
-  str_msg.data = buffer;
-  chatter.publish(&str_msg);
-#endif
-
-  // Apply forces from force topic
-  apply_force(&rc, force_x, force_y);
-
+  // spin the node
   nh.spinOnce();
-
 }
+
+float calculate_pwm(float val) {
+  float f = fabs(val);
+  if (f < 0.1)
+    return 0;
+  return TORQUE_FACTOR * pow(TORQUE_RATIO, f);
+}
+
 
 bool get_encoder_positions(RoboClaw *rc, int32_t *enc1, int32_t *enc2) {
   // variables to hold status info and if valid read
@@ -132,22 +145,22 @@ bool get_normal_positions(RoboClaw *rc, float *x, float *y) {
   return true;
 }
 
-void apply_force(RoboClaw *rc, float fx, float fy) {
-  // Ensure forces are between -1 and 1
-  fx = constrain(fx, -1, 1);
-  fy = constrain(fy, -1, 1);
+void apply_current(RoboClaw *rc, uint8_t x_direction, uint8_t x_val, uint8_t y_direction, uint8_t y_val) {
+  // switch (x_direction) {
+  //   case MOTOR_FORWARDS:
+  //     rc->ForwardM1(address, x_val);
+  //     break;
+  //   case MOTOR_BACKWARDS:
+  //     rc->BackwardM1(address, x_val);
+  //     break;
+  // }
 
-  // calculate pwms from forces
-  float pwm_x = constrain(get_PWM(fx), 0, 127);
-  float pwm_y = constrain(get_PWM(fy), 0, 127);
-
-  if (fx < 0)
-    rc->ForwardM1(address, pwm_x);
-  else
-    rc->BackwardM1(address, pwm_x);
-
-  if (fy < 0)
-    rc->ForwardM2(address, pwm_y);
-  else
-    rc->BackwardM2(address, pwm_y);
+  switch (y_direction) {
+    case MOTOR_FORWARDS:
+      rc->ForwardM2(address, y_val);
+      break;
+    case MOTOR_BACKWARDS:
+      rc->BackwardM2(address, y_val);
+      break;
+  }
 }
