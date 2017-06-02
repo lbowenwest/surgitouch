@@ -6,7 +6,8 @@
 #include <Arduino.h>
 #include <SoftwareSerial.h>
 #include <RoboClaw.h>
-#include <PID_v1.h>
+
+#include <TimedPID.h>
 
 #include "surgitouch.h"
 
@@ -17,17 +18,16 @@ ros::NodeHandle nh;
 RoboClaw rc(&Serial1, 10000);
 #define address 0x80
 
-
-// PID current control for each motor
-double Kp = 0, Ki = 0, Kd = 0;
-uint8_t x_direction = MOTOR_FORWARDS, y_direction = MOTOR_FORWARDS;
-// PID control for x motor
-double x_setpoint = 0, x_input = 0, x_output = 0;
-PID x_control(&x_setpoint, &x_input, &x_output, Kp, Ki, Kd, DIRECT);
-// PID control for y motor
-double y_setpoint = 0, y_input = 0, y_output = 0;
-PID y_control(&y_setpoint, &y_input, &y_output, Kp, Ki, Kd, DIRECT);
-
+#ifdef CURRENT_CONTROL
+  // PID current control for each motor
+  double Kp = 0.003, Ki = 24, Kd = 0;
+  // variable to keep track of time step
+  float time;
+  // PID control for x motor
+  TimedPID x_pid(Kp, Ki, Kd);
+  // PID control for y motor
+  TimedPID y_pid(Kp, Ki, Kd);
+#endif
 
 // message to send position to ROS
 geometry_msgs::Pose2D pos_msg;
@@ -38,11 +38,10 @@ ros::Publisher position("surgitouch/position", &pos_msg);
 // subscriber to force changes
 ros::Subscriber<geometry_msgs::Vector3> force("surgitouch/force", force_cb);
 // store forces in global variables
+float x_force = 0, y_force = 0;
 void force_cb(const geometry_msgs::Vector3 &message) {
-  x_direction = message.x > 0 ? MOTOR_FORWARDS : MOTOR_BACKWARDS;
-  x_setpoint = calculate_pwm(message.x);
-  y_direction = message.y > 0 ? MOTOR_FORWARDS : MOTOR_BACKWARDS;
-  y_setpoint = calculate_pwm(message.y);
+  x_force = message.x;
+  y_force = message.y;
 }
 
 
@@ -71,14 +70,18 @@ void setup() {
   rc.SetEncM1(address, 0);
   rc.SetEncM2(address, 0);
 
-  // set output limits for current controllers
-  x_control.SetOutputLimits(0, 127);
-  y_control.SetOutputLimits(0, 127);
+#ifdef CURRENT_CONTROL
+  // Set current output limits for safety
+  x_pid.setCmdRange(0, 2.5);
+  y_pid.setCmdRange(0, 2.5);
+  // initialise time step
+  time = millis();
+#endif
 }
 
 // loop function, runs forever
 void loop() {
-  // declare variable for positions, then read them
+  // declare variables for positions, then read them
   float x_pos, y_pos;
   get_normal_positions(&rc, &x_pos, &y_pos);
 
@@ -88,24 +91,28 @@ void loop() {
 
   position.publish(&pos_msg);
 
-  // read PWM values and set as current control inputs
-  x_input = rc.ReadSpeedM1(address);
-  y_input = rc.ReadSpeedM2(address);
-  // compute new current control
-  x_control.Compute();
-  y_control.Compute();
+#ifdef CURRENT_CONTROL
+  // calculate current setpoint from force values
+  float x_setpoint = get_current(x_force);
+  float y_setpoint = get_current(y_force);
+  // read current values and set as control inputs
+  int16_t x_current, y_current;
+  rc.ReadCurrents(address, x_current, y_current);
+  float x_input = (double)(x_current)/100;
+  float y_input = (double)(y_current)/100;
+  // calculate new values
+  float x_output = x_pid.getCmdStep(x_setpoint, x_input, millis() - time);
+  float y_output = x_pid.getCmdStep(y_setpoint, y_input, millis() - time);
+  // record new time
+  time = millis();
   // apply the currents through the roboclaw
-  apply_current(&rc, x_direction, (uint8_t)x_output, y_direction, (uint8_t)y_output);
+  apply_current(&rc, x_output, y_output);
+#else
+  apply_force(&rc, x_force, y_force);
+#endif
 
   // spin the node
   nh.spinOnce();
-}
-
-float calculate_pwm(float val) {
-  float f = fabs(val);
-  if (f < 0.1)
-    return 0;
-  return TORQUE_FACTOR * pow(TORQUE_RATIO, f);
 }
 
 
@@ -145,22 +152,34 @@ bool get_normal_positions(RoboClaw *rc, float *x, float *y) {
   return true;
 }
 
-void apply_current(RoboClaw *rc, uint8_t x_direction, uint8_t x_val, uint8_t y_direction, uint8_t y_val) {
-  // switch (x_direction) {
-  //   case MOTOR_FORWARDS:
-  //     rc->ForwardM1(address, x_val);
-  //     break;
-  //   case MOTOR_BACKWARDS:
-  //     rc->BackwardM1(address, x_val);
-  //     break;
-  // }
 
-  switch (y_direction) {
-    case MOTOR_FORWARDS:
-      rc->ForwardM2(address, y_val);
-      break;
-    case MOTOR_BACKWARDS:
-      rc->BackwardM2(address, y_val);
-      break;
-  }
+void apply_current(RoboClaw *rc, double x_current, double y_current) {
+  float pwm_x = constrain((x_current * MAX_PWM * RESISTANCE / NOMINAL_VOLTAGE), 0, MAX_PWM);
+  float pwm_y = constrain((y_current * MAX_PWM * RESISTANCE / NOMINAL_VOLTAGE), 0, MAX_PWM);
+
+  if (x_force > 0) // global force value to indicate direction
+    rc->ForwardM2(address, pwm_y);
+  else
+    rc->BackwardM2(address, pwm_y);
+
+  // if (y_force > 0)
+  //   rc->ForwardM1(address, pwm_x);
+  // else
+  //   rc->BackwardM1(address, pwm_x);
+
+}
+
+void apply_force(RoboClaw *rc, float fx, float fy) {
+  float pwm_x = constrain(get_pwm(fx), 0, MAX_PWM);
+  float pwm_y = constrain(get_pwm(fy), 0, MAX_PWM);
+
+  if (fx > 0)
+    rc->ForwardM2(address, pwm_y);
+  else
+    rc->BackwardM2(address, pwm_y);
+
+  // if (fy < 0)
+  //   rc->ForwardM1(address, pwm_x);
+  // else
+  //   rc->BackwardM1(address, pwm_x);
 }
