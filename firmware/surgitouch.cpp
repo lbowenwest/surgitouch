@@ -20,9 +20,7 @@ RoboClaw rc(&Serial1, 10000);
 
 #ifdef CURRENT_CONTROL
   // PID current control for each motor
-  double Kp = 0.003, Ki = 24, Kd = 0;
-  // variable to keep track of time step
-  float time;
+  double Kp = 0, Ki = 30, Kd = 0;
   // PID control for x motor
   TimedPID x_pid(Kp, Ki, Kd);
   // PID control for y motor
@@ -72,10 +70,8 @@ void setup() {
 
 #ifdef CURRENT_CONTROL
   // Set current output limits for safety
-  x_pid.setCmdRange(0, 2.5);
-  y_pid.setCmdRange(0, 2.5);
-  // initialise time step
-  time = millis();
+  x_pid.setCmdRange(0, MAX_PWM);
+  y_pid.setCmdRange(0, MAX_PWM);
 #endif
 }
 
@@ -92,24 +88,29 @@ void loop() {
   position.publish(&pos_msg);
 
 #ifdef CURRENT_CONTROL
-  // calculate current setpoint from force values
-  float x_setpoint = get_current(x_force);
-  float y_setpoint = get_current(y_force);
+  // calculate current setpoint from force values, and calculate PWM setpoint
+  float x_setpoint = get_current(x_force) * MAX_PWM * RESISTANCE / NOMINAL_VOLTAGE;
+  float y_setpoint = get_current(y_force) * MAX_PWM * RESISTANCE / NOMINAL_VOLTAGE;
+
   // read current values and set as control inputs
-  int16_t x_current, y_current;
-  rc.ReadCurrents(address, x_current, y_current);
-  float x_input = (double)(x_current)/100;
-  float y_input = (double)(y_current)/100;
+  int16_t x_current_rc, y_current_rc;
+  rc.ReadCurrents(address, x_current_rc, y_current_rc);
+  float x_current = (float)x_current_rc / 100;
+  float y_current = (float)y_current_rc / 100;
+  // float x_input = (float)x_current * MAX_PWM * RESISTANCE / NOMINAL_VOLTAGE;
+  // float y_input = (float)y_current * MAX_PWM * RESISTANCE / NOMINAL_VOLTAGE;
+  float x_input = current_to_pwm(x_current);
+  float y_input = current_to_pwm(y_current);
   // calculate new values
-  float x_output = x_pid.getCmdStep(x_setpoint, x_input, millis() - time);
-  float y_output = x_pid.getCmdStep(y_setpoint, y_input, millis() - time);
-  // record new time
-  time = millis();
-  // apply the currents through the roboclaw
-  apply_current(&rc, x_output, y_output);
+  float x_output = x_pid.getCmd(x_setpoint, x_input);
+  float y_output = y_pid.getCmd(y_setpoint, y_input);
+
 #else
-  apply_force(&rc, x_force, y_force);
+  float x_output = calculate_pwm(x_force);
+  float y_output = calculate_pwm(y_force);
 #endif
+
+  apply_force(&rc, x_output, y_output);
 
   // spin the node
   nh.spinOnce();
@@ -153,11 +154,33 @@ bool get_normal_positions(RoboClaw *rc, float *x, float *y) {
 }
 
 
-void apply_current(RoboClaw *rc, double x_current, double y_current) {
+float calculate_pwm(float val) {
+  float f = fabs(val);
+  if (f < FORCE_THRESHOLD)
+    return 0;
+  return MAX_PWM * (TORQUE_MIN / (NOMINAL_VOLTAGE * TORQUE_CONST)) * RESISTANCE * pow(TORQUE_RATIO, f);
+}
+
+float calculate_current(float val) {
+  float f = fabs(val);
+  if (f < FORCE_THRESHOLD)
+    return 0;
+  return (TORQUE_MIN / TORQUE_CONST) * pow(TORQUE_RATIO, f);
+}
+
+float current_to_pwm(float current) {
+  if (current < 0.8)
+    return 1;
+  else
+    return current * RESISTANCE / NOMINAL_VOLTAGE;
+}
+
+
+void apply_current(RoboClaw *rc, float x_current, float y_current) {
   float pwm_x = constrain((x_current * MAX_PWM * RESISTANCE / NOMINAL_VOLTAGE), 0, MAX_PWM);
   float pwm_y = constrain((y_current * MAX_PWM * RESISTANCE / NOMINAL_VOLTAGE), 0, MAX_PWM);
 
-  if (x_force > 0) // global force value to indicate direction
+  if (x_force < 0) // global force value to indicate direction
     rc->ForwardM2(address, pwm_y);
   else
     rc->BackwardM2(address, pwm_y);
@@ -170,16 +193,16 @@ void apply_current(RoboClaw *rc, double x_current, double y_current) {
 }
 
 void apply_force(RoboClaw *rc, float fx, float fy) {
-  float pwm_x = constrain(get_pwm(fx), 0, MAX_PWM);
-  float pwm_y = constrain(get_pwm(fy), 0, MAX_PWM);
+  fx = constrain(fx, 0, MAX_PWM);
+  fx = constrain(fx, 0, MAX_PWM);
 
-  if (fx > 0)
-    rc->ForwardM2(address, pwm_y);
+  if (x_force < 0)
+    rc->ForwardM2(address, fx);
   else
-    rc->BackwardM2(address, pwm_y);
+    rc->BackwardM2(address, fx);
 
-  // if (fy < 0)
-  //   rc->ForwardM1(address, pwm_x);
+  // if (y_force < 0)
+  //   rc->ForwardM1(address, fy);
   // else
-  //   rc->BackwardM1(address, pwm_x);
+  //   rc->BackwardM1(address, fy);
 }
