@@ -6,7 +6,7 @@
 #include <Arduino.h>
 #include <SoftwareSerial.h>
 #include <RoboClaw.h>
-
+#include <CapacitiveSensor.h>
 #include <TimedPID.h>
 
 #include "surgitouch.h"
@@ -26,6 +26,9 @@ RoboClaw rc(&Serial1, 10000);
   // PID control for y motor
   TimedPID y_pid(Kp, Ki, Kd);
 #endif
+
+// capacitive sensor on joystick to detect when being held
+CapacitiveSensor sensor(SENSOR_SEND_PIN, SENSOR_RECV_PIN);
 
 // message to send position to ROS
 geometry_msgs::Pose2D pos_msg;
@@ -110,7 +113,13 @@ void loop() {
   float y_output = calculate_pwm(y_force);
 #endif
 
-  apply_force(&rc, x_output, y_output);
+  // if touching the joystick apply the force
+  if (sensor.capacitiveSensor(SENSOR_SAMPLES) > SENSOR_THRESHOLD)
+    apply_force(&rc, x_output, y_output);
+
+  // otherwise don't, this helps mitigate the "ping-pong" effect
+  else
+    apply_force(&rc, 0, 0);
 
   // spin the node
   nh.spinOnce();

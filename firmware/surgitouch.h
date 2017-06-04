@@ -13,7 +13,6 @@
 #define SAFETY_FACTOR     1.5
 #define RESISTANCE        5.7
 #define NOMINAL_VOLTAGE   16.0
-#define MIN_CURRENT       0.0
 
 // #define TORQUE_MIN        (FORCE_MIN * JOYSTICK_LENGTH)
 #define TORQUE_MIN        (28.8)
@@ -23,6 +22,11 @@
 #define MAX_PWM           64
 
 #define FORCE_THRESHOLD   0.01
+
+#define SENSOR_THRESHOLD  20000
+#define SENSOR_SEND_PIN   4
+#define SENSOR_RECV_PIN   2
+#define SENSOR_SAMPLES    30
 
 // #define CURRENT_CONTROL
 // #define DEBUG
