@@ -1,100 +1,121 @@
 #include <ros.h>
 #include <geometry_msgs/Pose2D.h>
 #include <geometry_msgs/Vector3.h>
-#ifdef TESTING
-#include <std_msgs/String.h>
-#endif
+#include <std_msgs/Empty.h>
 
 #include <Arduino.h>
 #include <SoftwareSerial.h>
 #include <RoboClaw.h>
+
+#include <TimedPID.h>
 
 #include "surgitouch.h"
 
 // declare ROS node handler
 ros::NodeHandle nh;
 
-// declare RoboClaw
-// Serial1 is hardware serial on leonardo
+// declare RoboClaw, Serial1 is hardware serial on leonardo
 RoboClaw rc(&Serial1, 10000);
 #define address 0x80
 
-// values to store desired forces
-float force_x, force_y;
+#ifdef CURRENT_CONTROL
+  // PID current control for each motor
+  double Kp = 0, Ki = 30, Kd = 0;
+  // PID control for x motor
+  TimedPID x_pid(Kp, Ki, Kd);
+  // PID control for y motor
+  TimedPID y_pid(Kp, Ki, Kd);
+#endif
 
 // message to send position to ROS
 geometry_msgs::Pose2D pos_msg;
-
 // publisher for position
 ros::Publisher position("surgitouch/position", &pos_msg);
+
+
 // subscriber to force changes
 ros::Subscriber<geometry_msgs::Vector3> force("surgitouch/force", force_cb);
-
 // store forces in global variables
+float x_force = 0, y_force = 0;
 void force_cb(const geometry_msgs::Vector3 &message) {
-  force_x = message.x;
-  force_y = message.y;
+  x_force = message.x;
+  y_force = message.y;
 }
 
 
-#ifdef TESTING
-// buffer to store text, used in testing
-char buffer[50] = "hello world!\0";
-std_msgs::String str_msg;
-
-ros::Publisher chatter("surgitouch/chatter", &str_msg);
-ros::Subscriber<std_msgs::String> change("surgitouch/change_message", message_cb);
-
-void message_cb(const std_msgs::String &message) {
-  strcpy(buffer, message.data);
+// subscriber to zero encoders
+ros::Subscriber<std_msgs::Empty> zero("surgitouch/zero", zero_encoders);
+// zero the encoders
+void zero_encoders(const std_msgs::Empty &mesage) {
+  rc.SetEncM1(address, 0);
+  rc.SetEncM2(address, 0);
 }
-#endif
 
 
+// setup function, runs once
 void setup() {
   // initialise node handler
   nh.initNode();
 
-#ifdef TESTING
-  nh.advertise(chatter);
-  nh.subscribe(change);
-#endif
-
-  // advertise position channel, and subscribe to force channel
+  // advertise position channel, and subscribe to force and zero channels
   nh.advertise(position);
   nh.subscribe(force);
+  nh.subscribe(zero);
 
   // initialise RoboClaw communication
   rc.begin(38400);
   // set initial encoder values to zero
   rc.SetEncM1(address, 0);
   rc.SetEncM2(address, 0);
+
+#ifdef CURRENT_CONTROL
+  // Set current output limits for safety
+  x_pid.setCmdRange(0, MAX_PWM);
+  y_pid.setCmdRange(0, MAX_PWM);
+#endif
 }
 
-
+// loop function, runs forever
 void loop() {
-  // declare variable for positions, then read them
-  float pos_x, pos_y;
-  get_normal_positions(&rc, &pos_x, &pos_y);
+  // declare variables for positions, then read them
+  float x_pos, y_pos;
+  get_normal_positions(&rc, &x_pos, &y_pos);
 
   // publish the positions
-  pos_msg.x = pos_x;
-  pos_msg.y = pos_y;
+  pos_msg.x = x_pos;
+  pos_msg.y = y_pos;
 
   position.publish(&pos_msg);
 
+#ifdef CURRENT_CONTROL
+  // calculate current setpoint from force values, and calculate PWM setpoint
+  float x_setpoint = get_current(x_force) * MAX_PWM * RESISTANCE / NOMINAL_VOLTAGE;
+  float y_setpoint = get_current(y_force) * MAX_PWM * RESISTANCE / NOMINAL_VOLTAGE;
 
-#ifdef TESTING
-  str_msg.data = buffer;
-  chatter.publish(&str_msg);
+  // read current values and set as control inputs
+  int16_t x_current_rc, y_current_rc;
+  rc.ReadCurrents(address, x_current_rc, y_current_rc);
+  float x_current = (float)x_current_rc / 100;
+  float y_current = (float)y_current_rc / 100;
+  // float x_input = (float)x_current * MAX_PWM * RESISTANCE / NOMINAL_VOLTAGE;
+  // float y_input = (float)y_current * MAX_PWM * RESISTANCE / NOMINAL_VOLTAGE;
+  float x_input = current_to_pwm(x_current);
+  float y_input = current_to_pwm(y_current);
+  // calculate new values
+  float x_output = x_pid.getCmd(x_setpoint, x_input);
+  float y_output = y_pid.getCmd(y_setpoint, y_input);
+
+#else
+  float x_output = calculate_pwm(x_force);
+  float y_output = calculate_pwm(y_force);
 #endif
 
-  // Apply forces from force topic
-  apply_force(&rc, force_x, force_y);
+  apply_force(&rc, x_output, y_output);
 
+  // spin the node
   nh.spinOnce();
-
 }
+
 
 bool get_encoder_positions(RoboClaw *rc, int32_t *enc1, int32_t *enc2) {
   // variables to hold status info and if valid read
@@ -132,22 +153,56 @@ bool get_normal_positions(RoboClaw *rc, float *x, float *y) {
   return true;
 }
 
-void apply_force(RoboClaw *rc, float fx, float fy) {
-  // Ensure forces are between -1 and 1
-  fx = constrain(fx, -1, 1);
-  fy = constrain(fy, -1, 1);
 
-  // calculate pwms from forces
-  float pwm_x = constrain(get_PWM(fx), 0, 127);
-  float pwm_y = constrain(get_PWM(fy), 0, 127);
+float calculate_pwm(float val) {
+  float f = fabs(val);
+  if (f < FORCE_THRESHOLD)
+    return 0;
+  return MAX_PWM * (TORQUE_MIN / (NOMINAL_VOLTAGE * TORQUE_CONST)) * RESISTANCE * pow(TORQUE_RATIO, f);
+}
 
-  if (fx < 0)
-    rc->ForwardM1(address, pwm_x);
+float calculate_current(float val) {
+  float f = fabs(val);
+  if (f < FORCE_THRESHOLD)
+    return 0;
+  return (TORQUE_MIN / TORQUE_CONST) * pow(TORQUE_RATIO, f);
+}
+
+float current_to_pwm(float current) {
+  if (current < 0.8)
+    return 1;
   else
-    rc->BackwardM1(address, pwm_x);
+    return current * RESISTANCE / NOMINAL_VOLTAGE;
+}
 
-  if (fy < 0)
+
+void apply_current(RoboClaw *rc, float x_current, float y_current) {
+  float pwm_x = constrain((x_current * MAX_PWM * RESISTANCE / NOMINAL_VOLTAGE), 0, MAX_PWM);
+  float pwm_y = constrain((y_current * MAX_PWM * RESISTANCE / NOMINAL_VOLTAGE), 0, MAX_PWM);
+
+  if (x_force < 0) // global force value to indicate direction
     rc->ForwardM2(address, pwm_y);
   else
     rc->BackwardM2(address, pwm_y);
+
+  // if (y_force > 0)
+  //   rc->ForwardM1(address, pwm_x);
+  // else
+  //   rc->BackwardM1(address, pwm_x);
+
+}
+
+void apply_force(RoboClaw *rc, float fx, float fy) {
+  fx = constrain(fx, 0, MAX_PWM);
+  fx = constrain(fx, 0, MAX_PWM);
+
+  if (x_force < 0)
+    rc->ForwardM2(address, fx);
+  else
+    rc->BackwardM2(address, fx);
+
+  // if (y_force < 0)
+  //   rc->ForwardM1(address, fy);
+  // else
+  //   rc->BackwardM1(address, fy);
 }

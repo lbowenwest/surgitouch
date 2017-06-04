@@ -2,43 +2,46 @@
 #define _SURGITOUCH_H
 
 // define Kinematic values
-// Counts per revolution including rising and falling peaks
 #define COUNTS_PER_REV    14400
-// Height from centre of shaft to lid of joystick
 #define HEIGHT            17.5
-// Distance from centre of joystick to edge of workable space
-// In this case 20.86 allows for 50 deg of movement
 #define CENTRE_DISTANCE   25.6
-// Minimum force obtained through testing
 #define FORCE_MIN         0.11
-// Length of joystick (in mm)
 #define JOYSTICK_LENGTH   110
-// Torque Constant (mNm)
 #define TORQUE_CONST      35.2
-// Stall torque of motor (mNm)
-#define STALL_TORQUE      212
-// Safety factor
-#define SAFETY_FACTOR     1.5
-// Steps
 #define NUM_STEPS         20
-// Resistance (Ohms)
-#define RESISTANCE        3.99
-// Nominal Voltage = 24V
+#define STALL_TORQUE      212
+#define SAFETY_FACTOR     1.5
+#define RESISTANCE        5.7
 #define NOMINAL_VOLTAGE   16.0
+#define MIN_CURRENT       0.0
 
-#define TORQUE_MIN        FORCE_MIN * JOYSTICK_LENGTH
-#define TORQUE_MAX        STALL_TORQUE / SAFETY_FACTOR
+// #define TORQUE_MIN        (FORCE_MIN * JOYSTICK_LENGTH)
+#define TORQUE_MIN        (28.8)
+#define TORQUE_MAX        (STALL_TORQUE / SAFETY_FACTOR)
+#define TORQUE_RATIO      (TORQUE_MAX / TORQUE_MIN)
 
-#define get_PWM(length) (127 * (TORQUE_MIN / (NOMINAL_VOLTAGE * TORQUE_CONST)) * RESISTANCE * pow(TORQUE_MAX /TORQUE_MIN, fabs(length)))
+#define MAX_PWM           64
+
+#define FORCE_THRESHOLD   0.01
+
+// #define CURRENT_CONTROL
+// #define DEBUG
+
+#define get_pwm(val) (fabs(val) < 0.1 ? 0 : MAX_PWM * (TORQUE_MIN / (NOMINAL_VOLTAGE * TORQUE_CONST)) * RESISTANCE * pow(TORQUE_RATIO, fabs(val)))
+#define get_current(val) (fabs(val) < 0.05 ? 0 : (TORQUE_MIN / TORQUE_CONST) * pow(TORQUE_RATIO, fabs(val)))
+
+float calculate_pwm(float val);
+float calculate_current(float val);
+float current_to_pwm(float current);
 
 bool get_encoder_positions(RoboClaw *rc, int32_t *enc1, int32_t *enc2);
 bool get_normal_positions(RoboClaw *rc, float *x, float *y);
+
+void apply_current(RoboClaw *rc, float x_current, float y_current);
 void apply_force(RoboClaw *rc, float fx, float fy);
 
-#ifdef TESTING
-void message_cb(const std_msgs::String &message);
-#endif
-
+void zero_encoders(const std_msgs::Empty &message);
 void force_cb(const geometry_msgs::Vector3 &message);
+
 
 #endif

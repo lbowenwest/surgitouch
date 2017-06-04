@@ -2,23 +2,14 @@ cmake_minimum_required(VERSION 2.8.3)
 project(surgitouch)
 
 find_package(catkin REQUIRED COMPONENTS
-  rosserial_arduino
-  rosserial_client
+  rospy
 )
 
 catkin_package()
 
+catkin_python_setup()
 
-rosserial_generate_ros_lib(
-  PACKAGE rosserial_arduino
-  SCRIPT make_libraries.py
+catkin_install_python(
+  PROGRAMS nodes/visualiser.py
+  DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
-
-rosserial_configure_client(
-  DIRECTORY firmware
-  TOOLCHAIN_FILE ${ROSSERIAL_ARDUINO_TOOLCHAIN}
-)
-
-rosserial_add_client_target(firmware surgitouch ALL)
-rosserial_add_client_target(firmware surgitouch-upload)
-
