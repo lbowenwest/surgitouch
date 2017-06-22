@@ -132,8 +132,8 @@ void loop() {
 
 #endif
 
-
   apply_force(&rc, x_output, y_output);
+
 
   // spin the node
   nh.spinOnce();
