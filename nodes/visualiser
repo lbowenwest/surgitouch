@@ -1,0 +1,18 @@
+#!/usr/bin/env python2
+
+"""
+This starts a ROS node and a visualiser GUI to display position and force feedback
+"""
+
+from surgitouch.windows import Visualiser
+
+from shapely.geometry import Point, LineString
+
+
+# zone = Point(0, 0).buffer(0.2)
+# zone = Point(0, 0).buffer(0.4).difference(Point(0, 0).buffer(0.2))
+zone = LineString([(0, -1), (0, 1)]).buffer(0.15)
+
+if __name__ == '__main__':
+    vis = Visualiser(feedback=True, zone=zone, size=(1000, 1000))
+    vis.start()
