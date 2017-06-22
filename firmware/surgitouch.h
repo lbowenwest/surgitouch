@@ -3,8 +3,8 @@
 
 // define Kinematic values
 #define COUNTS_PER_REV    14400
-#define HEIGHT            17.5
-#define CENTRE_DISTANCE   25.6
+#define HEIGHT            20.5
+#define CENTRE_DISTANCE   18.2
 #define FORCE_MIN         0.11
 #define JOYSTICK_LENGTH   110
 #define TORQUE_CONST      35.2
@@ -20,9 +20,9 @@
 #define TORQUE_MAX        (STALL_TORQUE / SAFETY_FACTOR)
 #define TORQUE_RATIO      (TORQUE_MAX / TORQUE_MIN)
 
-#define MAX_PWM           64
+#define MAX_PWM           80
 
-#define FORCE_THRESHOLD   0.01
+#define FORCE_THRESHOLD   0.0
 
 // #define CURRENT_CONTROL
 // #define DEBUG
@@ -36,10 +36,11 @@ float current_to_pwm(float current);
 
 bool get_encoder_positions(RoboClaw *rc, int32_t *enc1, int32_t *enc2);
 bool get_normal_positions(RoboClaw *rc, float *x, float *y);
+bool get_speeds(RoboClaw *rc, uint32_t *x, uint32_t *y);
 
-void apply_current(RoboClaw *rc, float x_current, float y_current);
 void apply_force(RoboClaw *rc, float fx, float fy);
 
+// subsriber callback functions
 void zero_encoders(const std_msgs::Empty &message);
 void force_cb(const geometry_msgs::Vector3 &message);
 
